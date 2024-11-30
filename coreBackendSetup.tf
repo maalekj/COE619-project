@@ -39,6 +39,15 @@ resource "aws_lambda_function" "record_event_lambda" {
     source_code_hash = filebase64sha256("record_event_lambda.zip")
 }
 
+resource "aws_lambda_function" "event_validate_lambda" {
+    function_name = "event_validate_lambda"
+    handler       = "event_validate_lambda.lambda_handler"
+    runtime       = "python3.8"
+    role          = aws_iam_role.lambda_exec.arn
+    filename      = "event_validate_lambda.zip"
+    source_code_hash = filebase64sha256("event_validate_lambda.zip")
+}
+
 resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
@@ -73,6 +82,23 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
     })
 }
 
+resource "aws_iam_policy" "lambda_invoke_policy" {
+    name        = "lambda_invoke_policy"
+    description = "IAM policy for Lambda to invoke other Lambda functions"
+    policy      = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+            {
+                Effect = "Allow"
+                Action = [
+                    "lambda:InvokeFunction"
+                ]
+                Resource = "arn:aws:lambda:me-south-1:354918372412:function:event_validate_lambda"
+            }
+        ]
+    })
+}
+
 resource "aws_iam_role_policy_attachment" "lambda_exec_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
@@ -86,6 +112,11 @@ resource "aws_iam_role_policy_attachment" "lambda_policy" {
 resource "aws_iam_role_policy_attachment" "lambda_ec2_policy" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_invoke_policy_attachment" {
+    role       = aws_iam_role.lambda_exec.name
+    policy_arn = aws_iam_policy.lambda_invoke_policy.arn
 }
 
 resource "aws_api_gateway_integration" "get_event_integration" {
