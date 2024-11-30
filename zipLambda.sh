@@ -1,0 +1,2 @@
+zip record_event_lambda.zip record_event_lambda.py
+zip event_validate_lambda.zip event_validate_lambda.py
