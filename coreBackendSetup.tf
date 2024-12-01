@@ -66,7 +66,7 @@ resource "aws_iam_role" "lambda_exec" {
 }
 
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
-    name        = "lambda_dynamodb_policy-5"
+    name        = "lambda_dynamodb_policy"
     description = "IAM policy for Lambda to access DynamoDB"
     policy      = jsonencode({
         Version = "2012-10-17"
