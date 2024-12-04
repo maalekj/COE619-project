@@ -37,6 +37,7 @@ resource "aws_lambda_function" "record_event_lambda" {
     role          = aws_iam_role.lambda_exec.arn
     filename      = "record_event_lambda.zip"
     source_code_hash = filebase64sha256("record_event_lambda.zip")
+    timeout       = 30
 }
 
 resource "aws_lambda_function" "event_validate_lambda" {
@@ -46,6 +47,7 @@ resource "aws_lambda_function" "event_validate_lambda" {
     role          = aws_iam_role.lambda_exec.arn
     filename      = "event_validate_lambda.zip"
     source_code_hash = filebase64sha256("event_validate_lambda.zip")
+    timeout =  30
 }
 
 resource "aws_iam_role" "lambda_exec" {
@@ -99,6 +101,23 @@ resource "aws_iam_policy" "lambda_invoke_policy" {
     })
 }
 
+resource "aws_iam_policy" "lambda_ssm_policy" {
+    name        = "lambda_ssm_policy"
+    description = "IAM policy for Lambda to access SSM Parameter Store"
+    policy      = jsonencode({
+        Version = "2012-10-17",
+        Statement = [
+            {
+                Effect = "Allow",
+                Action = [
+                    "ssm:GetParameter"
+                ],
+                Resource = "arn:aws:ssm:me-south-1:${data.aws_caller_identity.current.account_id}:parameter/openai/api_key"
+            }
+        ]
+    })
+}
+
 resource "aws_iam_role_policy_attachment" "lambda_exec_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
@@ -117,6 +136,16 @@ resource "aws_iam_role_policy_attachment" "lambda_ec2_policy" {
 resource "aws_iam_role_policy_attachment" "lambda_invoke_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_invoke_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+    role       = aws_iam_role.lambda_exec.name
+    policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_ssm_policy_attachment" {
+    role       = aws_iam_role.lambda_exec.name
+    policy_arn = aws_iam_policy.lambda_ssm_policy.arn
 }
 
 resource "aws_api_gateway_integration" "get_event_integration" {
