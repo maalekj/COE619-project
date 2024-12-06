@@ -13,7 +13,7 @@ resource "aws_api_gateway_resource" "event_resource" {
     path_part   = "event"
 }
 
-resource "aws_api_gateway_method" "get_event_report" {
+resource "aws_api_gateway_method" "get_event" {
     rest_api_id   = aws_api_gateway_rest_api.rers_api.id
     resource_id   = aws_api_gateway_resource.event_resource.id
     http_method   = "GET"
@@ -54,6 +54,22 @@ resource "aws_lambda_function" "event_validate_lambda" {
     filename      = "event_validate_lambda.zip"
     source_code_hash = filebase64sha256("event_validate_lambda.zip")
     timeout =  30
+}
+
+resource "aws_lambda_function" "get_event_lambda" {
+  function_name = "get_event_lambda"
+  handler       = "get_event_lambda.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "get_event_lambda.zip"
+  source_code_hash = filebase64sha256("get_event_lambda.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE_NAME = aws_dynamodb_table.my_private_table.name
+    }
+  }
 }
 
 resource "aws_iam_role" "lambda_exec" {
@@ -139,6 +155,24 @@ resource "aws_iam_policy" "lambda_sns_publish_policy" {
   })
 }
 
+resource "aws_iam_policy" "lambda_dynamodb_access_policy" {
+  name        = "lambda_dynamodb_access_policy"
+  description = "IAM policy for Lambda to access DynamoDB"
+  policy      = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = [
+          "dynamodb:GetItem",
+          "dynamodb:Query"
+        ],
+        Resource = aws_dynamodb_table.my_private_table.arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "lambda_exec_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
@@ -174,13 +208,18 @@ resource "aws_iam_role_policy_attachment" "lambda_sns_publish_policy_attachment"
   policy_arn = aws_iam_policy.lambda_sns_publish_policy.arn
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb_access_policy_attachment" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.lambda_dynamodb_access_policy.arn
+}
+
 resource "aws_api_gateway_integration" "get_event_integration" {
     rest_api_id             = aws_api_gateway_rest_api.rers_api.id
     resource_id             = aws_api_gateway_resource.event_resource.id
-    http_method             = aws_api_gateway_method.get_event_report.http_method
+    http_method             = aws_api_gateway_method.get_event.http_method
     type                    = "AWS_PROXY"
     integration_http_method = "POST"
-    uri                     = aws_lambda_function.record_event_lambda.invoke_arn
+    uri                     = aws_lambda_function.get_event_lambda.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "post_event_integration" {
@@ -199,16 +238,14 @@ resource "aws_api_gateway_deployment" "deployment" {
 }
 
 resource "aws_api_gateway_stage" "prod" {
-    deployment_id = aws_api_gateway_deployment.deployment.id
-    rest_api_id   = aws_api_gateway_rest_api.rers_api.id
-    stage_name    = "prod"
+  stage_name    = "prod"
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  deployment_id = aws_api_gateway_deployment.deployment.id
 
-    xray_tracing_enabled = true
+  xray_tracing_enabled = true
 
-    lifecycle {
-        ignore_changes = [stage_name]
-    }
 }
+
 
 resource "aws_lambda_permission" "apigw_invoke" {
     statement_id  = "AllowAPIGatewayInvoke"
@@ -226,6 +263,14 @@ resource "aws_lambda_permission" "allow_sns_publish" {
   source_arn    = aws_sns_topic.event_topic.arn
 }
 
+resource "aws_lambda_permission" "allow_api_gateway_invoke_get_event" {
+    statement_id  = "AllowAPIGatewayInvokeGetEventReport"
+    action        = "lambda:InvokeFunction"
+    function_name = aws_lambda_function.get_event_lambda.function_name
+    principal     = "apigateway.amazonaws.com"
+    source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
 data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
@@ -234,7 +279,7 @@ resource "aws_s3_bucket" "bucket" {
     bucket = "my-private-bucket-fddse334"
 }
 
-resource "aws_dynamodb_table" "table" {
+resource "aws_dynamodb_table" "my_private_table" {
     name           = "my-private-table"
     billing_mode   = "PAY_PER_REQUEST"
     hash_key       = "id"
