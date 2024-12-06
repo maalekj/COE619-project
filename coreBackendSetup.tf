@@ -31,13 +31,19 @@ resource "aws_api_gateway_method" "post_event" {
 }
 
 resource "aws_lambda_function" "record_event_lambda" {
-    function_name = "record_event_lambda"
-    handler       = "record_event_lambda.lambda_handler"
-    runtime       = "python3.8"
-    role          = aws_iam_role.lambda_exec.arn
-    filename      = "record_event_lambda.zip"
-    source_code_hash = filebase64sha256("record_event_lambda.zip")
-    timeout       = 30
+  function_name = "record_event_lambda"
+  handler       = "record_event_lambda.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "record_event_lambda.zip"
+  source_code_hash = filebase64sha256("record_event_lambda.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      SNS_TOPIC_ARN = aws_sns_topic.event_topic.arn
+    }
+  }
 }
 
 resource "aws_lambda_function" "event_validate_lambda" {
@@ -118,6 +124,21 @@ resource "aws_iam_policy" "lambda_ssm_policy" {
     })
 }
 
+resource "aws_iam_policy" "lambda_sns_publish_policy" {
+  name        = "lambda_sns_publish_policy"
+  description = "IAM policy for Lambda to publish to SNS"
+  policy      = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = "sns:Publish",
+        Resource = aws_sns_topic.event_topic.arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "lambda_exec_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
@@ -146,6 +167,11 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 resource "aws_iam_role_policy_attachment" "lambda_ssm_policy_attachment" {
     role       = aws_iam_role.lambda_exec.name
     policy_arn = aws_iam_policy.lambda_ssm_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_sns_publish_policy_attachment" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.lambda_sns_publish_policy.arn
 }
 
 resource "aws_api_gateway_integration" "get_event_integration" {
@@ -192,6 +218,14 @@ resource "aws_lambda_permission" "apigw_invoke" {
     source_arn    = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.rers_api.id}/*/POST/event"
 }
 
+resource "aws_lambda_permission" "allow_sns_publish" {
+  statement_id  = "AllowSNSPublish"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.record_event_lambda.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.event_topic.arn
+}
+
 data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
@@ -209,4 +243,8 @@ resource "aws_dynamodb_table" "table" {
         name = "id"
         type = "S"
     }
+}
+
+resource "aws_sns_topic" "event_topic" {
+  name = "event_topic"
 }

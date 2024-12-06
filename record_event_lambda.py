@@ -2,13 +2,22 @@ import json
 import base64
 import boto3
 import uuid
+from decimal import Decimal
+import os
 
 # Initialize the DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name='me-south-1')
 table = dynamodb.Table('my-private-table')
 
 # Initialize the Lambda client
-lambda_client = boto3.client('lambda', region_name='me-south-1')
+lambda_client = boto3.client("lambda", region_name="me-south-1")
+
+# Initialize the SNS client
+sns_client = boto3.client("sns")
+
+# Get the SNS topic ARN from environment variables
+SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
+
 
 def lambda_handler(event, context):
     try:
@@ -63,6 +72,9 @@ def lambda_handler(event, context):
         # Store the item in DynamoDB
         store_item_in_dynamodb(item)
 
+        # Publish the event ID and type to the SNS topic
+        publish_to_sns(item_id, event_type)
+
         # Return a successful response
         return create_response(200, {"message": "Event recorded successfully"})
 
@@ -107,8 +119,14 @@ def call_event_validate_lambda(image):
         InvocationType='RequestResponse',
         Payload=json.dumps({"image": image})
     )
-    response_payload = json.loads(response['Payload'].read())
-    return json.loads(response_payload['body'])
+    response_payload = json.loads(response["Payload"].read())
+    return json.loads(response_payload["body"])
+
+
+def publish_to_sns(event_id, event_type):
+    message = {"event_id": event_id, "event_type": event_type}
+    sns_client.publish(TopicArn=SNS_TOPIC_ARN, Message=json.dumps(message))
+
 
 def create_response(status_code, body):
     return {"statusCode": status_code, "body": json.dumps(body)}
