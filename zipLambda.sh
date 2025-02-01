@@ -10,6 +10,7 @@ zip get_event_lambda.zip get_event_lambda.py
 zip register_edge_point.zip register_edge_point.py
 zip get_edge_node.zip get_edge_node.py
 zip get_all_nodes.zip get_all_nodes.py
+zip update_edge_node.zip update_edge_node.py
 
 # Zip the contents of the event-evaluation folder
 zip -r event_validate_lambda.zip event_validate_lambda/

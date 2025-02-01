@@ -120,6 +120,22 @@ resource "aws_lambda_function" "get_all_nodes_lambda" {
   }
 }
 
+resource "aws_lambda_function" "update_edge_node_lambda" {
+  function_name = "update_edge_node"
+  handler       = "update_edge_node.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "update_edge_node.zip"
+  source_code_hash = filebase64sha256("update_edge_node.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      EDGE_NODE_TABLE_NAME = aws_dynamodb_table.edge_node_table.name
+    }
+  }
+}
+
 resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
@@ -303,6 +319,13 @@ resource "aws_api_gateway_method" "get_edge_node" {
   authorization = "NONE"
 }
 
+resource "aws_api_gateway_method" "put_edge_node" {
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  resource_id   = aws_api_gateway_resource.edge_node_resource.id
+  http_method   = "PUT"
+  authorization = "NONE"
+}
+
 resource "aws_api_gateway_integration" "register_edge_point_integration" {
   rest_api_id             = aws_api_gateway_rest_api.rers_api.id
   resource_id             = aws_api_gateway_resource.edge_node_resource.id
@@ -319,6 +342,15 @@ resource "aws_api_gateway_integration" "get_edge_node_integration" {
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
   uri                     = aws_lambda_function.get_edge_node_lambda.invoke_arn
+}
+
+resource "aws_api_gateway_integration" "update_edge_node_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.rers_api.id
+  resource_id             = aws_api_gateway_resource.edge_node_resource.id
+  http_method             = aws_api_gateway_method.put_edge_node.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.update_edge_node_lambda.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "all_nodes_resource" {
@@ -350,7 +382,8 @@ resource "aws_api_gateway_deployment" "deployment" {
       aws_api_gateway_integration.post_event_integration,
       aws_api_gateway_integration.register_edge_point_integration,
       aws_api_gateway_integration.get_edge_node_integration,
-      aws_api_gateway_integration.get_all_nodes_integration
+      aws_api_gateway_integration.get_all_nodes_integration,
+      aws_api_gateway_integration.update_edge_node_integration
     ]
     description = "Deployment for RERS API"
 }
@@ -408,6 +441,14 @@ resource "aws_lambda_permission" "allow_api_gateway_invoke_get_all_nodes" {
   statement_id  = "AllowAPIGatewayInvokeGetAllNodes"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.get_all_nodes_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway_invoke_update_edge_node" {
+  statement_id  = "AllowAPIGatewayInvokeUpdateEdgeNode"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.update_edge_node_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
 }
