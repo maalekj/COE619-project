@@ -72,6 +72,16 @@ resource "aws_lambda_function" "get_event_lambda" {
   }
 }
 
+resource "aws_lambda_function" "register_edge_point_lambda" {
+  function_name = "register_edge_point"
+  handler       = "register_edge_point.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "register_edge_point.zip"
+  source_code_hash = filebase64sha256("register_edge_point.zip")
+  timeout       = 30
+}
+
 resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
@@ -231,9 +241,31 @@ resource "aws_api_gateway_integration" "post_event_integration" {
     uri                     = aws_lambda_function.record_event_lambda.invoke_arn
 }
 
+resource "aws_api_gateway_resource" "edge_node_resource" {
+  rest_api_id = aws_api_gateway_rest_api.rers_api.id
+  parent_id   = aws_api_gateway_rest_api.rers_api.root_resource_id
+  path_part   = "edge-node"
+}
+
+resource "aws_api_gateway_method" "post_edge_node" {
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  resource_id   = aws_api_gateway_resource.edge_node_resource.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "register_edge_point_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.rers_api.id
+  resource_id             = aws_api_gateway_resource.edge_node_resource.id
+  http_method             = aws_api_gateway_method.post_edge_node.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.register_edge_point_lambda.invoke_arn
+}
+
 resource "aws_api_gateway_deployment" "deployment" {
     rest_api_id = aws_api_gateway_rest_api.rers_api.id
-    depends_on  = [aws_api_gateway_integration.get_event_integration, aws_api_gateway_integration.post_event_integration]
+    depends_on  = [aws_api_gateway_integration.get_event_integration, aws_api_gateway_integration.post_event_integration, aws_api_gateway_integration.register_edge_point_integration]
     description = "Deployment for RERS API"
 }
 
@@ -245,7 +277,6 @@ resource "aws_api_gateway_stage" "prod" {
   xray_tracing_enabled = true
 
 }
-
 
 resource "aws_lambda_permission" "apigw_invoke" {
     statement_id  = "AllowAPIGatewayInvoke"
@@ -269,6 +300,14 @@ resource "aws_lambda_permission" "allow_api_gateway_invoke_get_event" {
     function_name = aws_lambda_function.get_event_lambda.function_name
     principal     = "apigateway.amazonaws.com"
     source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway_invoke_register_edge_point" {
+  statement_id  = "AllowAPIGatewayInvokeRegisterEdgePoint"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.register_edge_point_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
 }
 
 data "aws_region" "current" {}
