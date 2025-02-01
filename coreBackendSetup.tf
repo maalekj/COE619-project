@@ -80,6 +80,12 @@ resource "aws_lambda_function" "register_edge_point_lambda" {
   filename      = "register_edge_point.zip"
   source_code_hash = filebase64sha256("register_edge_point.zip")
   timeout       = 30
+
+  environment {
+    variables = {
+      EDGE_NODE_TABLE_NAME = aws_dynamodb_table.edge_node_table.name
+    }
+  }
 }
 
 resource "aws_iam_role" "lambda_exec" {
@@ -108,9 +114,13 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
             {
                 Effect = "Allow"
                 Action = [
-                    "dynamodb:PutItem"
+                    "dynamodb:PutItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:GetItem",
+                    "dynamodb:Scan",
+                    "dynamodb:Query"
                 ]
-                Resource = "*"
+                Resource = aws_dynamodb_table.edge_node_table.arn
             }
         ]
     })
@@ -327,6 +337,17 @@ resource "aws_dynamodb_table" "my_private_table" {
         name = "id"
         type = "S"
     }
+}
+
+resource "aws_dynamodb_table" "edge_node_table" {
+  name           = "EdgeNodeTable"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "node_id"
+
+  attribute {
+    name = "node_id"
+    type = "S"
+  }
 }
 
 resource "aws_sns_topic" "event_topic" {
