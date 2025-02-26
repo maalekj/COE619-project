@@ -138,6 +138,22 @@ resource "aws_lambda_function" "update_edge_node_lambda" {
   }
 }
 
+resource "aws_lambda_function" "get_all_events_lambda" {
+  function_name = "get_all_events"
+  handler       = "get_all_events.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "get_all_events.zip"
+  source_code_hash = filebase64sha256("get_all_events.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      EVENT_TABLE_NAME = aws_dynamodb_table.my_private_table.name
+    }
+  }
+}
+
 resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
@@ -156,27 +172,27 @@ resource "aws_iam_role" "lambda_exec" {
 }
 
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
-    name        = "lambda_dynamodb_policy"
-    description = "IAM policy for Lambda to access DynamoDB"
-    policy      = jsonencode({
-        Version = "2012-10-17",
-        Statement = [
-            {
-                Effect = "Allow",
-                Action = [
-                    "dynamodb:PutItem",
-                    "dynamodb:UpdateItem",
-                    "dynamodb:GetItem",
-                    "dynamodb:Scan",
-                    "dynamodb:Query"
-                ],
-                Resource = [
-                    aws_dynamodb_table.edge_node_table.arn,
-                    aws_dynamodb_table.my_private_table.arn
-                ]
-            }
+  name        = "lambda_dynamodb_policy"
+  description = "IAM policy for Lambda to access DynamoDB"
+  policy      = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = [
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:GetItem",
+          "dynamodb:Scan",
+          "dynamodb:Query"
+        ],
+        Resource = [
+          aws_dynamodb_table.edge_node_table.arn,
+          aws_dynamodb_table.my_private_table.arn
         ]
-    })
+      }
+    ]
+  })
 }
 
 resource "aws_iam_policy" "lambda_invoke_policy" {
@@ -286,6 +302,11 @@ resource "aws_iam_role_policy_attachment" "lambda_dynamodb_access_policy_attachm
   policy_arn = aws_iam_policy.lambda_dynamodb_access_policy.arn
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb_policy_attachment" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
+}
+
 resource "aws_api_gateway_integration" "get_event_integration" {
     rest_api_id             = aws_api_gateway_rest_api.rers_api.id
     resource_id             = aws_api_gateway_resource.event_resource.id
@@ -380,17 +401,40 @@ resource "aws_api_gateway_integration" "get_all_nodes_integration" {
   uri                     = aws_lambda_function.get_all_nodes_lambda.invoke_arn
 }
 
+resource "aws_api_gateway_resource" "all_events_resource" {
+  rest_api_id = aws_api_gateway_rest_api.rers_api.id
+  parent_id   = aws_api_gateway_rest_api.rers_api.root_resource_id
+  path_part   = "all-events"
+}
+
+resource "aws_api_gateway_method" "get_all_events" {
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  resource_id   = aws_api_gateway_resource.all_events_resource.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "get_all_events_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.rers_api.id
+  resource_id             = aws_api_gateway_resource.all_events_resource.id
+  http_method             = aws_api_gateway_method.get_all_events.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.get_all_events_lambda.invoke_arn
+}
+
 resource "aws_api_gateway_deployment" "deployment" {
-    rest_api_id = aws_api_gateway_rest_api.rers_api.id
-    depends_on  = [
-      aws_api_gateway_integration.get_event_integration,
-      aws_api_gateway_integration.post_event_integration,
-      aws_api_gateway_integration.register_edge_point_integration,
-      aws_api_gateway_integration.get_edge_node_integration,
-      aws_api_gateway_integration.get_all_nodes_integration,
-      aws_api_gateway_integration.update_edge_node_integration
-    ]
-    description = "Deployment for RERS API"
+  rest_api_id = aws_api_gateway_rest_api.rers_api.id
+  depends_on  = [
+    aws_api_gateway_integration.get_event_integration,
+    aws_api_gateway_integration.post_event_integration,
+    aws_api_gateway_integration.register_edge_point_integration,
+    aws_api_gateway_integration.get_edge_node_integration,
+    aws_api_gateway_integration.get_all_nodes_integration,
+    aws_api_gateway_integration.update_edge_node_integration,
+    aws_api_gateway_integration.get_all_events_integration
+  ]
+  description = "Deployment for RERS API"
 }
 
 resource "aws_api_gateway_stage" "prod" {
@@ -454,6 +498,14 @@ resource "aws_lambda_permission" "allow_api_gateway_invoke_update_edge_node" {
   statement_id  = "AllowAPIGatewayInvokeUpdateEdgeNode"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.update_edge_node_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway_invoke_get_all_events" {
+  statement_id  = "AllowAPIGatewayInvokeGetAllEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.get_all_events_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
 }

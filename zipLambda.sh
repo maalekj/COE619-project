@@ -5,6 +5,7 @@
 # event files
 zip record_event_lambda.zip record_event_lambda.py
 zip get_event_lambda.zip get_event_lambda.py
+zip get_all_events.zip get_all_events.py
 
 # edge files
 zip register_edge_point.zip register_edge_point.py
