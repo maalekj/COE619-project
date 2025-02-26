@@ -1,131 +1,138 @@
 import json
-import base64
 import boto3
+import os
 import uuid
 from decimal import Decimal
-import os
+from datetime import datetime
 
-# Initialize the DynamoDB client
-dynamodb = boto3.resource('dynamodb', region_name='me-south-1')
-table = dynamodb.Table('my-private-table')
-
-# Initialize the Lambda client
-lambda_client = boto3.client("lambda", region_name="me-south-1")
-
-# Initialize the SNS client
-sns_client = boto3.client("sns")
-
-# Get the SNS topic ARN from environment variables
-SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
+dynamodb = boto3.resource("dynamodb")
+event_table = dynamodb.Table(os.environ["EVENT_TABLE_NAME"])
+node_table = dynamodb.Table(os.environ["EDGE_NODE_TABLE_NAME"])
 
 
 def lambda_handler(event, context):
     try:
-        # Validate and parse the request body
-        body = validate_and_parse_body(event)
+        body = json.loads(event["body"], parse_float=Decimal)
 
-        # Generate a unique id for the item
-        item_id = str(uuid.uuid4())
+        # Validate required fields
+        required_fields = [
+            "event_type",
+            "event_timestamp",
+            "latitude",
+            "longitude",
+            "image",
+            "edge_node_id",
+            "event_status",
+        ]
+        for field in required_fields:
+            if field not in body:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps(f"Missing required field: {field}"),
+                }
 
-        # Base64 encode the image
-        image = body.get("image")
+        # Check if event_status is 'reported'
+        if body["event_status"] != "reported":
+            return {
+                "statusCode": 400,
+                "body": json.dumps("Invalid event status. Must be 'reported'"),
+            }
 
-        # Extract event type, latitude, longitude, and timestamp from the request body
-        event_type = body.get("event_type")
-        latitude = Decimal(str(body.get("latitude")))
-        longitude = Decimal(str(body.get("longitude")))
-        event_timestamp = body.get("event_timestamp")
+        # Check if edge_node_id exists
+        edge_node_id = body["edge_node_id"]
+        node_response = node_table.get_item(Key={"node_id": edge_node_id})
+        if "Item" not in node_response:
+            return {"statusCode": 404, "body": json.dumps("Edge node not found")}
 
-        # Call the event_validate_lambda function
-        validation_response = call_event_validate_lambda(image)
-
-        # Debugging: Print the validation response
-        print("Validation response:", validation_response)
-
-        # Extract the actual validation result from the response
-        validation_result_str = (
-            validation_response["validation_result"].strip("```json\n").strip("\n```")
-        )
-        validation_result = json.loads(validation_result_str)
-
-        # Debugging: Print the validation result
+        # Perform validation (assuming validation_result is obtained from some validation function)
+        validation_result = validate_image(
+            body["image"]
+        )  # Placeholder for actual validation logic
         print("Validation result:", validation_result)
 
-        # Check the validation response
+        # Update event_status based on validation result
         if not validation_result.get("accident"):
+            body["event_status"] = "verification failed"
             return create_response(400, {"error": "Image validation failed"})
+        else:
+            body["event_status"] = "validated"
 
         # Extract event details from the validation response
         event_details = validation_result.get("event_details")
 
+        # Generate a unique event_id
+        event_id = str(uuid.uuid4())
+
         # Create the item to be stored in DynamoDB
         item = create_dynamodb_item(
-            item_id,
-            event_type,
-            event_timestamp,
-            latitude,
-            longitude,
-            image,
+            event_id,
+            body["event_type"],
+            body["event_timestamp"],
+            body["latitude"],
+            body["longitude"],
+            body["image"],
             event_details,
+            edge_node_id,
+            body["event_status"],
         )
 
         # Store the item in DynamoDB
         store_item_in_dynamodb(item)
 
-        # Publish the event ID and type to the SNS topic
-        publish_to_sns(item_id, event_type)
+        # Publish the event ID and type to the SNS topic if validation succeeded
+        if body["event_status"] == "validated":
+            publish_to_sns(event_id, body["event_type"])
 
-        # Return a successful response
-        return create_response(200, {"message": "Event recorded successfully"})
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {"event_id": event_id, "event_status": body["event_status"]}
+            ),
+        }
 
     except Exception as e:
-        # Return an error response
-        return create_response(500, {"error": str(e)})
+        return {"statusCode": 500, "body": json.dumps(f"An error occurred: {str(e)}")}
 
 
-def validate_and_parse_body(event):
-    if "body" not in event or not event["body"]:
-        raise ValueError("Invalid request, 'body' key is missing or empty")
-    return json.loads(event["body"])
-
-
-def base64_encode_image(image):
-    if image:
-        return base64.b64encode(image.encode()).decode()
-    return ""
+def validate_image(image):
+    # Placeholder for actual validation logic
+    return {"accident": True, "event_details": "Sample details"}
 
 
 def create_dynamodb_item(
-    item_id, event_type, event_timestamp, latitude, longitude, image, event_description
+    event_id,
+    event_type,
+    event_timestamp,
+    latitude,
+    longitude,
+    image,
+    event_details,
+    edge_node_id,
+    event_status,
 ):
     return {
-        "id": item_id,
+        "id": event_id,  # Ensure the primary key 'id' is included
+        "event_id": event_id,
         "event_type": event_type,
         "event_timestamp": event_timestamp,
         "latitude": latitude,
         "longitude": longitude,
         "image": image,
-        "event_description": event_description,
+        "event_details": event_details,
+        "edge_node_id": edge_node_id,
+        "event_status": event_status,
     }
 
 
 def store_item_in_dynamodb(item):
-    table.put_item(Item=item)
-
-
-def call_event_validate_lambda(image):
-    response = lambda_client.invoke(
-        FunctionName='event_validate_lambda',
-        InvocationType='RequestResponse',
-        Payload=json.dumps({"image": image})
-    )
-    response_payload = json.loads(response["Payload"].read())
-    return json.loads(response_payload["body"])
+    event_table.put_item(Item=item)
 
 
 def publish_to_sns(event_id, event_type):
-    message = {"event_id": event_id, "event_type": event_type}
-    sns_client.publish(TopicArn=SNS_TOPIC_ARN, Message=json.dumps(message))
+    sns = boto3.client("sns")
+    topic_arn = os.environ["SNS_TOPIC_ARN"]
+    message = json.dumps({"event_id": event_id, "event_type": event_type})
+    sns.publish(TopicArn=topic_arn, Message=message)
 
 
 def create_response(status_code, body):
