@@ -42,6 +42,8 @@ resource "aws_lambda_function" "record_event_lambda" {
   environment {
     variables = {
       SNS_TOPIC_ARN = aws_sns_topic.event_topic.arn
+      EVENT_TABLE_NAME = aws_dynamodb_table.my_private_table.name
+      EDGE_NODE_TABLE_NAME = aws_dynamodb_table.edge_node_table.name
     }
   }
 }
@@ -140,13 +142,13 @@ resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
     assume_role_policy = jsonencode({
-        Version = "2012-10-17"
+        Version = "2012-10-17",
         Statement = [
             {
-                Effect = "Allow"
+                Effect = "Allow",
                 Principal = {
                     Service = "lambda.amazonaws.com"
-                }
+                },
                 Action = "sts:AssumeRole"
             }
         ]
@@ -157,18 +159,21 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
     name        = "lambda_dynamodb_policy"
     description = "IAM policy for Lambda to access DynamoDB"
     policy      = jsonencode({
-        Version = "2012-10-17"
+        Version = "2012-10-17",
         Statement = [
             {
-                Effect = "Allow"
+                Effect = "Allow",
                 Action = [
                     "dynamodb:PutItem",
                     "dynamodb:UpdateItem",
                     "dynamodb:GetItem",
                     "dynamodb:Scan",
                     "dynamodb:Query"
+                ],
+                Resource = [
+                    aws_dynamodb_table.edge_node_table.arn,
+                    aws_dynamodb_table.my_private_table.arn
                 ]
-                Resource = aws_dynamodb_table.edge_node_table.arn
             }
         ]
     })
@@ -178,13 +183,13 @@ resource "aws_iam_policy" "lambda_invoke_policy" {
     name        = "lambda_invoke_policy"
     description = "IAM policy for Lambda to invoke other Lambda functions"
     policy      = jsonencode({
-        Version = "2012-10-17"
+        Version = "2012-10-17",
         Statement = [
             {
-                Effect = "Allow"
+                Effect = "Allow",
                 Action = [
                     "lambda:InvokeFunction"
-                ]
+                ],
                 Resource = "arn:aws:lambda:me-south-1:354918372412:function:event_validate_lambda"
             }
         ]
