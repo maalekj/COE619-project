@@ -30,6 +30,13 @@ resource "aws_api_gateway_method" "post_event" {
     }
 }
 
+resource "aws_api_gateway_method" "put_event" {
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  resource_id   = aws_api_gateway_resource.event_resource.id
+  http_method   = "PUT"
+  authorization = "NONE"
+}
+
 resource "aws_lambda_function" "record_event_lambda" {
   function_name = "record_event_lambda"
   handler       = "record_event_lambda.lambda_handler"
@@ -145,6 +152,22 @@ resource "aws_lambda_function" "get_all_events_lambda" {
   role          = aws_iam_role.lambda_exec.arn
   filename      = "get_all_events.zip"
   source_code_hash = filebase64sha256("get_all_events.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      EVENT_TABLE_NAME = aws_dynamodb_table.my_private_table.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "update_event_lambda" {
+  function_name = "update_event"
+  handler       = "update_event.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "update_event.zip"
+  source_code_hash = filebase64sha256("update_event.zip")
   timeout       = 30
 
   environment {
@@ -325,6 +348,15 @@ resource "aws_api_gateway_integration" "post_event_integration" {
     uri                     = aws_lambda_function.record_event_lambda.invoke_arn
 }
 
+resource "aws_api_gateway_integration" "update_event_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.rers_api.id
+  resource_id             = aws_api_gateway_resource.event_resource.id
+  http_method             = aws_api_gateway_method.put_event.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.update_event_lambda.invoke_arn
+}
+
 resource "aws_api_gateway_resource" "edge_node_resource" {
   rest_api_id = aws_api_gateway_rest_api.rers_api.id
   parent_id   = aws_api_gateway_rest_api.rers_api.root_resource_id
@@ -432,7 +464,8 @@ resource "aws_api_gateway_deployment" "deployment" {
     aws_api_gateway_integration.get_edge_node_integration,
     aws_api_gateway_integration.get_all_nodes_integration,
     aws_api_gateway_integration.update_edge_node_integration,
-    aws_api_gateway_integration.get_all_events_integration
+    aws_api_gateway_integration.get_all_events_integration,
+    aws_api_gateway_integration.update_event_integration
   ]
   description = "Deployment for RERS API"
 }
@@ -506,6 +539,14 @@ resource "aws_lambda_permission" "allow_api_gateway_invoke_get_all_events" {
   statement_id  = "AllowAPIGatewayInvokeGetAllEvents"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.get_all_events_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway_invoke_update_event" {
+  statement_id  = "AllowAPIGatewayInvokeUpdateEvent"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.update_event_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
 }
