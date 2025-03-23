@@ -177,6 +177,22 @@ resource "aws_lambda_function" "update_event_lambda" {
   }
 }
 
+resource "aws_lambda_function" "heartbeat_lambda" {
+  function_name = "heartbeat"
+  handler       = "heartbeat.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_exec.arn
+  filename      = "heartbeat.zip"
+  source_code_hash = filebase64sha256("heartbeat.zip")
+  timeout       = 30
+
+  environment {
+    variables = {
+      EDGE_NODE_TABLE_NAME = aws_dynamodb_table.edge_node_table.name
+    }
+  }
+}
+
 resource "aws_iam_role" "lambda_exec" {
     name = "lambda_exec_role"
 
@@ -455,6 +471,28 @@ resource "aws_api_gateway_integration" "get_all_events_integration" {
   uri                     = aws_lambda_function.get_all_events_lambda.invoke_arn
 }
 
+resource "aws_api_gateway_resource" "heartbeat_resource" {
+  rest_api_id = aws_api_gateway_rest_api.rers_api.id
+  parent_id   = aws_api_gateway_rest_api.rers_api.root_resource_id
+  path_part   = "heartbeat"
+}
+
+resource "aws_api_gateway_method" "put_heartbeat" {
+  rest_api_id   = aws_api_gateway_rest_api.rers_api.id
+  resource_id   = aws_api_gateway_resource.heartbeat_resource.id
+  http_method   = "PUT"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "heartbeat_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.rers_api.id
+  resource_id             = aws_api_gateway_resource.heartbeat_resource.id
+  http_method             = aws_api_gateway_method.put_heartbeat.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.heartbeat_lambda.invoke_arn
+}
+
 resource "aws_api_gateway_deployment" "deployment" {
   rest_api_id = aws_api_gateway_rest_api.rers_api.id
   depends_on  = [
@@ -465,7 +503,8 @@ resource "aws_api_gateway_deployment" "deployment" {
     aws_api_gateway_integration.get_all_nodes_integration,
     aws_api_gateway_integration.update_edge_node_integration,
     aws_api_gateway_integration.get_all_events_integration,
-    aws_api_gateway_integration.update_event_integration
+    aws_api_gateway_integration.update_event_integration,
+    aws_api_gateway_integration.heartbeat_integration
   ]
   description = "Deployment for RERS API"
 }
@@ -547,6 +586,14 @@ resource "aws_lambda_permission" "allow_api_gateway_invoke_update_event" {
   statement_id  = "AllowAPIGatewayInvokeUpdateEvent"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.update_event_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_api_gateway_invoke_heartbeat" {
+  statement_id  = "AllowAPIGatewayInvokeHeartbeat"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.heartbeat_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.rers_api.execution_arn}/*/*"
 }
