@@ -21,7 +21,7 @@ def lambda_handler(event, context):
             "latitude",
             "longitude",
             "image",
-            "edge_node_id",
+            "node_id",
             "event_status",
         ]
         for field in required_fields:
@@ -38,9 +38,9 @@ def lambda_handler(event, context):
                 "body": json.dumps("Invalid event status. Must be 'reported'"),
             }
 
-        # Check if edge_node_id exists
-        edge_node_id = body["edge_node_id"]
-        node_response = node_table.get_item(Key={"node_id": edge_node_id})
+        # Check if node_id exists
+        node_id = body["node_id"]
+        node_response = node_table.get_item(Key={"node_id": node_id})
         if "Item" not in node_response:
             return {"statusCode": 404, "body": json.dumps("Edge node not found")}
 
@@ -72,7 +72,7 @@ def lambda_handler(event, context):
             body["longitude"],
             body["image"],
             event_details,
-            edge_node_id,
+            node_id,
             body["event_status"],
         )
 
@@ -107,7 +107,7 @@ def create_dynamodb_item(
     longitude,
     image,
     event_details,
-    edge_node_id,
+    node_id,
     event_status,
 ):
     return {
@@ -119,7 +119,7 @@ def create_dynamodb_item(
         "longitude": longitude,
         "image": image,
         "event_details": event_details,
-        "edge_node_id": edge_node_id,
+        "node_id": node_id,
         "event_status": event_status,
     }
 
