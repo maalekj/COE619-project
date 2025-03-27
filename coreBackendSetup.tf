@@ -51,6 +51,8 @@ resource "aws_lambda_function" "record_event_lambda" {
       SNS_TOPIC_ARN = aws_sns_topic.event_topic.arn
       EVENT_TABLE_NAME = aws_dynamodb_table.my_private_table.name
       EDGE_NODE_TABLE_NAME = aws_dynamodb_table.edge_node_table.name
+      EVENT_VALIDATE_LAMBDA_NAME  = aws_lambda_function.event_validate_lambda.function_name
+
     }
   }
 }

@@ -68,27 +68,49 @@ def lambda_handler(event, context):
             ],
         )
         validation_result = response.choices[0].message.content
+        print(f"Raw validation result (repr): {repr(validation_result)}")
 
-        # Assuming the response content is a JSON string with validation, category, and event details
-        validation_data = json.loads(validation_result)
+        # Clean up the response to remove any extra formatting
+        # Normalize the string by stripping leading/trailing whitespace
+        validation_result = validation_result.strip()
+
+        # Remove the prefix ```json and suffix ```
+        if validation_result.startswith("```json"):
+            validation_result = validation_result[len("```json") :].strip()
+        if validation_result.endswith("```"):
+            validation_result = validation_result[: -len("```")].strip()
+
+        print(f"Cleaned validation result: {repr(validation_result)}")
+
+        # Parse the cleaned JSON string returned by OpenAI
+        try:
+            validation_data = json.loads(validation_result)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from OpenAI response: {e}")
+            return {
+                "statusCode": 500,
+                "body": json.dumps(
+                    {"error": "Invalid JSON format from OpenAI response"}
+                ),
+            }
+
+        # Extract fields from the parsed JSON
         is_valid = validation_data.get("accident")
         category = validation_data.get("category")
         event_details = validation_data.get("eventdetails")
 
-        if is_valid:
-            result = {
-                "validation_result": "true",
-                "category": category,
-                "event_details": event_details,
-            }
-        else:
-            result = {"validation_result": "false"}
+        # Construct the result
+        result = {
+            "accident": is_valid,
+            "category": category,
+            "event_details": event_details,
+        }
 
     except Exception as e:
         print(f"Request to OpenAI API failed: {e}")
         result = {
-            "validation_result": "false",
-            "error": f"Failed to get response from ChatGPT, Request to OpenAI API failed: {e}",
+            "accident": False,
+            "error": f"Failed to get response from ChatGPT: {e}",
         }
 
     # Return the validation result

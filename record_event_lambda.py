@@ -8,6 +8,7 @@ from datetime import datetime
 dynamodb = boto3.resource("dynamodb")
 event_table = dynamodb.Table(os.environ["EVENT_TABLE_NAME"])
 node_table = dynamodb.Table(os.environ["EDGE_NODE_TABLE_NAME"])
+lambda_client = boto3.client("lambda")
 
 
 def lambda_handler(event, context):
@@ -44,21 +45,19 @@ def lambda_handler(event, context):
         if "Item" not in node_response:
             return {"statusCode": 404, "body": json.dumps("Edge node not found")}
 
-        # Perform validation (assuming validation_result is obtained from some validation function)
-        validation_result = validate_image(
-            body["image"]
-        )  # Placeholder for actual validation logic
+        # Perform validation by calling event_validate_lambda
+        validation_result = validate_image(body["image"])
         print("Validation result:", validation_result)
 
         # Update event_status based on validation result
         if not validation_result.get("accident"):
-            body["event_status"] = "verification failed"
-            return create_response(400, {"error": "Image validation failed"})
+            body["event_status"] = "invalid"
+            event_details = "Validation failed"
         else:
             body["event_status"] = "validated"
-
-        # Extract event details from the validation response
-        event_details = validation_result.get("event_details")
+            event_details = validation_result.get(
+                "event_details", "No details available"
+            )
 
         # Generate a unique event_id
         event_id = str(uuid.uuid4())
@@ -83,6 +82,7 @@ def lambda_handler(event, context):
         if body["event_status"] == "validated":
             publish_to_sns(event_id, body["event_type"])
 
+        # Return a consistent response structure
         return {
             "statusCode": 200,
             "body": json.dumps(
@@ -95,8 +95,24 @@ def lambda_handler(event, context):
 
 
 def validate_image(image):
-    # Placeholder for actual validation logic
-    return {"accident": True, "event_details": "Sample details"}
+    try:
+        response = lambda_client.invoke(
+            FunctionName=os.environ["EVENT_VALIDATE_LAMBDA_NAME"],
+            InvocationType="RequestResponse",
+            Payload=json.dumps({"image": image}),
+        )
+        response_payload = json.loads(response["Payload"].read())
+        validation_result_raw = response_payload["body"]
+        print(f"Raw validation result: {validation_result_raw}")
+
+        # Parse the JSON string returned by the validation Lambda
+        validation_result = json.loads(validation_result_raw)
+        print(f"Parsed validation result: {validation_result}")
+
+        return validation_result
+    except Exception as e:
+        print(f"Error invoking event_validate_lambda: {e}")
+        return {"accident": False, "event_details": None}
 
 
 def create_dynamodb_item(
